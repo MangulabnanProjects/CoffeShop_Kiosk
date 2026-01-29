@@ -1,4 +1,4 @@
-# vape_kiosk
+# CoffeShop_kiosk
 
 A new Flutter project.
 
