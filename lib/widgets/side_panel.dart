@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/category.dart';
+import '../models/ingredient.dart';
 
 class SidePanel extends StatelessWidget {
   final List<Category> categories;
@@ -14,6 +15,11 @@ class SidePanel extends StatelessWidget {
     required this.onCategorySelected,
     required this.onStorageTap,
   });
+
+  // Check if any ingredients are low stock or out of stock
+  bool get _hasLowStock {
+    return sampleIngredients.any((i) => i.isLowStock || i.isOutOfStock);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -174,15 +180,57 @@ class SidePanel extends StatelessWidget {
                       color: const Color(0xFF4A7C59).withOpacity(0.3),
                     ),
                   ),
-                  child: const Row(
+                  child: Row(
                     children: [
-                      Icon(
-                        Icons.warehouse_rounded,
-                        size: 20,
-                        color: Color(0xFF4A7C59),
+                      // Storage icon with warning badge
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          const Icon(
+                            Icons.warehouse_rounded,
+                            size: 20,
+                            color: Color(0xFF4A7C59),
+                          ),
+                          // Warning badge - exclamation point
+                          if (_hasLowStock)
+                            Positioned(
+                              top: -6,
+                              right: -6,
+                              child: Container(
+                                width: 16,
+                                height: 16,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFD35555),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 2,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(0xFFD35555).withOpacity(0.4),
+                                      blurRadius: 4,
+                                      offset: const Offset(0, 1),
+                                    ),
+                                  ],
+                                ),
+                                child: const Center(
+                                  child: Text(
+                                    '!',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      height: 1,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
-                      SizedBox(width: 10),
-                      Expanded(
+                      const SizedBox(width: 10),
+                      const Expanded(
                         child: Text(
                           'Storage',
                           style: TextStyle(
@@ -192,7 +240,7 @@ class SidePanel extends StatelessWidget {
                           ),
                         ),
                       ),
-                      Icon(
+                      const Icon(
                         Icons.arrow_forward_ios_rounded,
                         size: 14,
                         color: Color(0xFF4A7C59),

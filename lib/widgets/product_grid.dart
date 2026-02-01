@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/product.dart';
+import '../models/recipe.dart';
+import '../services/inventory_service.dart';
 
 class ProductGrid extends StatelessWidget {
   final List<Product> products;
@@ -82,9 +84,21 @@ class _ProductCardState extends State<_ProductCard> {
       ? widget.product.priceTall 
       : widget.product.priceGrande;
 
+  String get _currentSize => _isTallSelected ? 'tall' : 'grande';
+
+  // Get availability for current size
+  ProductAvailability get _availability {
+    return inventoryService.checkProductAvailability(widget.product.id, _currentSize);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final isOutOfStock = outOfStockProductIds.contains(widget.product.id);
+    // Check both manual out-of-stock and ingredient-based availability
+    final isManuallyOutOfStock = outOfStockProductIds.contains(widget.product.id);
+    final availability = _availability;
+    final isIngredientOutOfStock = !availability.isAvailable;
+    final isOutOfStock = isManuallyOutOfStock || isIngredientOutOfStock;
+    final isLowStock = availability.maxServings > 0 && availability.maxServings < 6;
     
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = !isOutOfStock && true),
@@ -107,10 +121,12 @@ class _ProductCardState extends State<_ProductCard> {
                   border: Border.all(
                     color: isOutOfStock
                         ? const Color(0xFFCCCCCC)
-                        : (_isHovered 
-                            ? const Color(0xFF4A7C59)
-                            : const Color(0xFFE8E0D8)),
-                    width: _isHovered ? 2 : 1,
+                        : (isLowStock
+                            ? const Color(0xFFE8A850)
+                            : (_isHovered 
+                                ? const Color(0xFF4A7C59)
+                                : const Color(0xFFE8E0D8))),
+                    width: (_isHovered || isLowStock) ? 2 : 1,
                   ),
                   boxShadow: _isHovered && !isOutOfStock
                       ? [
@@ -150,24 +166,51 @@ class _ProductCardState extends State<_ProductCard> {
                               ),
                             ),
                           ),
-                          // Out of Stock overlay
+                          // Out of Stock overlay - centered in middle
                           if (isOutOfStock)
                             Positioned.fill(
                               child: Container(
                                 margin: const EdgeInsets.all(8),
                                 decoration: BoxDecoration(
-                                  color: Colors.black.withOpacity(0.5),
+                                  color: Colors.black.withOpacity(0.6),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
-                                child: const Center(
-                                  child: Text(
-                                    'OUT OF\nSTOCK',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                      letterSpacing: 1,
+                                child: Center(
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFD35555),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(
+                                          Icons.block_rounded,
+                                          color: Colors.white,
+                                          size: 20,
+                                        ),
+                                        const SizedBox(height: 2),
+                                        const Text(
+                                          'OUT OF STOCK',
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                            letterSpacing: 0.5,
+                                          ),
+                                        ),
+                                        if (availability.missingIngredients.isNotEmpty)
+                                          Text(
+                                            'No ${availability.missingIngredients.first}',
+                                            textAlign: TextAlign.center,
+                                            style: const TextStyle(
+                                              color: Colors.white70,
+                                              fontSize: 8,
+                                            ),
+                                          ),
+                                      ],
                                     ),
                                   ),
                                 ),
@@ -226,6 +269,27 @@ class _ProductCardState extends State<_ProductCard> {
                                 ),
                               ),
                             ),
+                          // Low stock badge (only if not out of stock)
+                          if (isLowStock && !isOutOfStock)
+                            Positioned(
+                              top: 12,
+                              right: 12,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE8A850),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  '${availability.maxServings} left',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
                           // Coming Soon overlay
                           if (widget.product.isComingSoon && !isOutOfStock)
                             Positioned.fill(
@@ -273,17 +337,59 @@ class _ProductCardState extends State<_ProductCard> {
                               overflow: TextOverflow.ellipsis,
                             ),
                             const SizedBox(height: 4),
-                            // Product description (scrollable)
+                            // Low stock warning overlay on description
                             Expanded(
-                              child: SingleChildScrollView(
-                                child: Text(
-                                  widget.product.description,
-                                  style: TextStyle(
-                                    color: const Color(0xFF8B7355).withOpacity(0.8),
-                                    fontSize: 10,
-                                    height: 1.3,
+                              child: Stack(
+                                children: [
+                                  SingleChildScrollView(
+                                    child: Text(
+                                      widget.product.description,
+                                      style: TextStyle(
+                                        color: const Color(0xFF8B7355).withOpacity(0.8),
+                                        fontSize: 10,
+                                        height: 1.3,
+                                      ),
+                                    ),
                                   ),
-                                ),
+                                  // Low stock warning on top of description
+                                  if (isLowStock && !isOutOfStock && availability.warningMessage != null)
+                                    Positioned(
+                                      top: 0,
+                                      left: 0,
+                                      right: 0,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFFFF3E0),
+                                          borderRadius: BorderRadius.circular(4),
+                                          border: Border.all(color: const Color(0xFFE8A850).withOpacity(0.5)),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(
+                                              Icons.warning_amber_rounded,
+                                              size: 12,
+                                              color: Color(0xFFE8A850),
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Expanded(
+                                              child: Text(
+                                                availability.warningMessage!,
+                                                style: const TextStyle(
+                                                  color: Color(0xFFB8860B),
+                                                  fontSize: 9,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
                             const SizedBox(height: 6),
@@ -392,3 +498,4 @@ class _ProductCardState extends State<_ProductCard> {
     );
   }
 }
+

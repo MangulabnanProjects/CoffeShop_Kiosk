@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/ingredient.dart';
 
 class StorageSidePanel extends StatelessWidget {
   final String selectedItem;
@@ -11,6 +12,11 @@ class StorageSidePanel extends StatelessWidget {
     required this.onItemSelected,
     required this.onMenuTap,
   });
+
+  // Check if any ingredients are low stock
+  bool get _hasLowStock {
+    return sampleIngredients.any((i) => i.isLowStock || i.isOutOfStock);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -67,6 +73,7 @@ class StorageSidePanel extends StatelessWidget {
                     label: 'Storage',
                     isSelected: selectedItem == 'storage',
                     onTap: () => onItemSelected('storage'),
+                    showWarning: _hasLowStock,
                   ),
                   const SizedBox(height: 6),
                   _buildNavItem(
@@ -150,6 +157,7 @@ class StorageSidePanel extends StatelessWidget {
     required String label,
     required bool isSelected,
     required VoidCallback onTap,
+    bool showWarning = false,
   }) {
     return Material(
       color: Colors.transparent,
@@ -164,10 +172,41 @@ class StorageSidePanel extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Icon(
-                icon,
-                size: 18,
-                color: isSelected ? Colors.white : const Color(0xFF8B7355),
+              // Icon with optional warning badge
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(
+                    icon,
+                    size: 18,
+                    color: isSelected ? Colors.white : const Color(0xFF8B7355),
+                  ),
+                  // Warning badge in top left
+                  if (showWarning)
+                    Positioned(
+                      top: -6,
+                      left: -6,
+                      child: Container(
+                        width: 14,
+                        height: 14,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFD35555),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: isSelected ? const Color(0xFF4A7C59) : Colors.white,
+                            width: 2,
+                          ),
+                        ),
+                        child: const Center(
+                          child: Icon(
+                            Icons.priority_high_rounded,
+                            size: 10,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
               const SizedBox(width: 10),
               Expanded(

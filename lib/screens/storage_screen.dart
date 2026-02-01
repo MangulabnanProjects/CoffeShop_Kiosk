@@ -3,6 +3,8 @@ import 'package:flutter/gestures.dart';
 import '../models/ingredient.dart';
 import '../models/product.dart';
 import '../widgets/storage_side_panel.dart';
+import '../services/persistence_service.dart';
+
 
 class StorageScreen extends StatefulWidget {
   final VoidCallback onBackToMenu;
@@ -25,6 +27,9 @@ class _StorageScreenState extends State<StorageScreen> {
   
   // Storage Search
   String _storageSearchQuery = '';
+  
+  // Scroll controller for ingredient list
+  final ScrollController _scrollController = ScrollController();
 
 
   List<Ingredient> get _filteredIngredients {
@@ -99,9 +104,47 @@ class _StorageScreenState extends State<StorageScreen> {
     showDialog(
       context: context,
       barrierColor: Colors.black54,
-      builder: (context) => _SummaryDialog(ingredients: sampleIngredients),
+      builder: (context) => _SummaryDialog(
+        ingredients: sampleIngredients,
+        onItemTap: (ingredient) {
+          Navigator.pop(context); // Close dialog
+          _scrollToIngredient(ingredient);
+        },
+      ),
     );
   }
+  
+  void _scrollToIngredient(Ingredient ingredient) {
+    // Reset filters to show all items
+    setState(() {
+      _selectedCategory = 'All';
+      _storageSearchQuery = '';
+    });
+    
+    // Find the index of the ingredient in the full list
+    final index = sampleIngredients.indexWhere((i) => i.id == ingredient.id);
+    if (index == -1) return;
+    
+    // Calculate the grid position
+    // Grid has 4 columns, each row height is approximately 150 pixels (based on childAspectRatio: 1.2)
+    const columns = 4;
+    const rowHeight = 150.0; // Approximate height including spacing
+    final row = index ~/ columns;
+    final targetPosition = row * rowHeight;
+    
+    // Wait for the UI to update, then scroll
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          targetPosition.clamp(0.0, _scrollController.position.maxScrollExtent),
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeInOut,
+        );
+      }
+    });
+  }
+
+
 
   void _showAddItemDialog() {
     showDialog(
@@ -113,10 +156,13 @@ class _StorageScreenState extends State<StorageScreen> {
           setState(() {
             sampleIngredients.add(ingredient);
           });
+          // Save ingredients to persistence
+          PersistenceService.saveIngredients();
         },
       ),
     );
   }
+
 
   void _showRestockDialog(Ingredient ingredient) {
     final index = sampleIngredients.indexWhere((i) => i.id == ingredient.id);
@@ -130,23 +176,45 @@ class _StorageScreenState extends State<StorageScreen> {
         onRestock: (amount) {
           setState(() {
             final currentItem = sampleIngredients[index];
-            // If adding amount, increase current stock.
-            // Also reset usedAmount as requested "without deductions"
+            // Amount can be positive (adding) or negative (deducting)
             double newCurrent = currentItem.currentStock + amount;
+            // Clamp to valid range
             if (newCurrent > currentItem.maxStock) newCurrent = currentItem.maxStock;
+            if (newCurrent < 0) newCurrent = 0;
+            
+            // Track deductions in usedAmount if reducing stock
+            double newUsed = currentItem.usedAmount;
+            if (amount < 0) {
+              newUsed += amount.abs();
+            } else {
+              // Reset usedAmount when adding stock
+              newUsed = 0;
+            }
             
             sampleIngredients[index] = currentItem.copyWith(
               currentStock: newCurrent,
-              usedAmount: 0,
+              usedAmount: newUsed,
             );
           });
+          
+          // Save ingredients to persistence
+          PersistenceService.saveIngredients();
         },
       ),
     );
   }
 
+
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
+
     return Scaffold(
       backgroundColor: const Color(0xFFF5F0EB),
       body: Row(
@@ -414,6 +482,7 @@ class _StorageScreenState extends State<StorageScreen> {
                                     },
                                   ),
                                   child: GridView.builder(
+                                    controller: _scrollController,
                                     physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
                                     gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                                       crossAxisCount: 4,
@@ -427,6 +496,7 @@ class _StorageScreenState extends State<StorageScreen> {
                                       return _buildIngredientCard(ingredient);
                                     },
                                   ),
+
                                 ),
                               ),
                             ],
@@ -927,7 +997,10 @@ class _StorageScreenState extends State<StorageScreen> {
                           outOfStockProductIds.add(product.id);
                         }
                       });
+                      // Save out of stock products to persistence
+                      PersistenceService.saveOutOfStockProducts(outOfStockProductIds);
                     },
+
                     child: Container(
                       padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
@@ -1021,15 +1094,29 @@ class _StorageScreenState extends State<StorageScreen> {
 // Summary Dialog
 class _SummaryDialog extends StatelessWidget {
   final List<Ingredient> ingredients;
+  final Function(Ingredient)? onItemTap;
 
-  const _SummaryDialog({required this.ingredients});
+  const _SummaryDialog({required this.ingredients, this.onItemTap});
+
 
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
     
+    // Get items with usage and sort by urgency (low stock first)
     final usedIngredients = ingredients.where((i) => i.hasUsage).toList();
+    usedIngredients.sort((a, b) {
+      // Out of stock first
+      if (a.currentStock <= 0 && b.currentStock > 0) return -1;
+      if (b.currentStock <= 0 && a.currentStock > 0) return 1;
+      // Then low stock
+      if (a.isLowStock && !b.isLowStock) return -1;
+      if (b.isLowStock && !a.isLowStock) return 1;
+      // Then by stock percentage (lowest first)
+      return a.stockPercentage.compareTo(b.stockPercentage);
+    });
+
     
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -1116,74 +1203,113 @@ class _SummaryDialog extends StatelessWidget {
                   itemCount: usedIngredients.length,
                   itemBuilder: (context, index) {
                     final item = usedIngredients[index];
-                    return Container(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      decoration: BoxDecoration(
-                        border: Border(
-                          bottom: BorderSide(color: const Color(0xFFE8E0D8).withOpacity(0.5)),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            flex: 3,
-                            child: Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(6),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFF5F0EB),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Icon(
-                                    _getCategoryIcon(item.category),
-                                    size: 14,
-                                    color: const Color(0xFF8B7355),
-                                  ),
+                    return Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: onItemTap != null ? () => onItemTap!(item) : null,
+                        borderRadius: BorderRadius.circular(8),
+                        hoverColor: const Color(0xFF4A7C59).withOpacity(0.08),
+                        splashColor: const Color(0xFF4A7C59).withOpacity(0.15),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                          decoration: BoxDecoration(
+                            border: Border(
+                              bottom: BorderSide(color: const Color(0xFFE8E0D8).withOpacity(0.5)),
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(6),
+                                      decoration: BoxDecoration(
+                                        color: item.isLowStock 
+                                            ? const Color(0xFFFFEBEB) 
+                                            : const Color(0xFFF5F0EB),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Icon(
+                                        _getCategoryIcon(item.category),
+                                        size: 14,
+                                        color: item.isLowStock 
+                                            ? const Color(0xFFD35555) 
+                                            : const Color(0xFF8B7355),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            item.name,
+                                            style: const TextStyle(color: Color(0xFF2C1810), fontSize: 13, fontWeight: FontWeight.w500),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          if (item.isLowStock || item.isOutOfStock)
+                                            Text(
+                                              item.isOutOfStock ? 'Out of Stock' : 'Low Stock',
+                                              style: TextStyle(
+                                                color: const Color(0xFFD35555).withOpacity(0.8),
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                    // Navigate arrow indicator
+                                    if (onItemTap != null)
+                                      Container(
+                                        padding: const EdgeInsets.all(4),
+                                        child: Icon(
+                                          Icons.arrow_forward_rounded,
+                                          size: 14,
+                                          color: const Color(0xFF8B7355).withOpacity(0.5),
+                                        ),
+                                      ),
+                                  ],
                                 ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    item.name,
-                                    style: const TextStyle(color: Color(0xFF2C1810), fontSize: 13, fontWeight: FontWeight.w500),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Expanded(
-                            flex: 2,
-                            child: Text(
-                              '${item.maxStock} ${item.unit}',
-                              style: const TextStyle(color: Color(0xFF5A4A3A), fontSize: 13),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                          Expanded(
-                            flex: 2,
-                            child: Text(
-                              '-${item.usedAmount} ${item.unit}',
-                              style: const TextStyle(color: Color(0xFFD35555), fontSize: 13, fontWeight: FontWeight.w600),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                          Expanded(
-                            flex: 2,
-                            child: Text(
-                              '${item.currentStock} ${item.unit}',
-                              style: TextStyle(
-                                color: item.isLowStock ? const Color(0xFFD35555) : const Color(0xFF4A7C59),
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
                               ),
-                              textAlign: TextAlign.center,
-                            ),
+                              Expanded(
+                                flex: 2,
+                                child: Text(
+                                  '${item.maxStock} ${item.unit}',
+                                  style: const TextStyle(color: Color(0xFF5A4A3A), fontSize: 13),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                              Expanded(
+                                flex: 2,
+                                child: Text(
+                                  '-${item.usedAmount.toStringAsFixed(item.usedAmount.truncateToDouble() == item.usedAmount ? 0 : 2)} ${item.unit}',
+                                  style: const TextStyle(color: Color(0xFFD35555), fontSize: 13, fontWeight: FontWeight.w600),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                              Expanded(
+                                flex: 2,
+                                child: Text(
+                                  '${item.currentStock.toStringAsFixed(item.currentStock.truncateToDouble() == item.currentStock ? 0 : 2)} ${item.unit}',
+                                  style: TextStyle(
+                                    color: item.isLowStock ? const Color(0xFFD35555) : const Color(0xFF4A7C59),
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
                     );
                   },
+
                 ),
               ),
             ),
@@ -1577,7 +1703,7 @@ class _AddItemDialogState extends State<_AddItemDialog> {
   }
 }
 
-// Restock Dialog
+// Restock Dialog with Slider
 class _RestockDialog extends StatefulWidget {
   final Ingredient ingredient;
   final Function(double) onRestock;
@@ -1593,6 +1719,13 @@ class _RestockDialog extends StatefulWidget {
 
 class _RestockDialogState extends State<_RestockDialog> {
   final TextEditingController _amountController = TextEditingController();
+  late double _sliderValue;
+
+  @override
+  void initState() {
+    super.initState();
+    _sliderValue = widget.ingredient.currentStock;
+  }
 
   @override
   void dispose() {
@@ -1615,12 +1748,29 @@ class _RestockDialogState extends State<_RestockDialog> {
     Navigator.pop(context);
   }
 
+  void _applySliderChange() {
+    // Calculate the difference from current to new value
+    final diff = _sliderValue - widget.ingredient.currentStock;
+    if (diff != 0) {
+      widget.onRestock(diff);
+      Navigator.pop(context);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final stockPercentage = _sliderValue / widget.ingredient.maxStock;
+    final isLow = stockPercentage <= 0.2;
+    final isOut = _sliderValue <= 0;
+    
+    Color sliderColor = isOut 
+        ? const Color(0xFF9E9E9E) 
+        : (isLow ? const Color(0xFFD35555) : const Color(0xFF4A7C59));
+
     return Dialog(
       backgroundColor: Colors.transparent,
       child: Container(
-        width: 350,
+        width: 400,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
@@ -1644,10 +1794,10 @@ class _RestockDialogState extends State<_RestockDialog> {
               ),
               child: Row(
                 children: [
-                   const Icon(Icons.add_shopping_cart_rounded, color: Colors.white, size: 20),
+                   const Icon(Icons.tune_rounded, color: Colors.white, size: 20),
                    const SizedBox(width: 8),
                    const Text(
-                    'Restock Item',
+                    'Adjust Stock',
                     style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const Spacer(),
@@ -1671,16 +1821,183 @@ class _RestockDialogState extends State<_RestockDialog> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    widget.ingredient.name,
-                    style: const TextStyle(color: Color(0xFF2C1810), fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Current Stock: ${widget.ingredient.currentStock} ${widget.ingredient.unit}',
-                    style: TextStyle(color: const Color(0xFF8B7355), fontSize: 13),
+                  // Item info
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.ingredient.name,
+                              style: const TextStyle(color: Color(0xFF2C1810), fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Current: ${widget.ingredient.currentStock.toStringAsFixed(1)} / ${widget.ingredient.maxStock} ${widget.ingredient.unit}',
+                              style: const TextStyle(color: Color(0xFF8B7355), fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // New value display
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: sliderColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: sliderColor.withOpacity(0.3)),
+                        ),
+                        child: Column(
+                          children: [
+                            Text(
+                              _sliderValue.toStringAsFixed(1),
+                              style: TextStyle(
+                                color: sliderColor,
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              widget.ingredient.unit,
+                              style: TextStyle(
+                                color: sliderColor.withOpacity(0.7),
+                                fontSize: 10,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 20),
+                  
+                  // Stock slider section
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF5F0EB),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      children: [
+                        // Slider labels
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              '← Deduct',
+                              style: TextStyle(color: Color(0xFFD35555), fontSize: 10, fontWeight: FontWeight.w600),
+                            ),
+                            Text(
+                              'Slide to adjust',
+                              style: TextStyle(color: const Color(0xFF8B7355).withOpacity(0.7), fontSize: 10),
+                            ),
+                            const Text(
+                              'Add →',
+                              style: TextStyle(color: Color(0xFF4A7C59), fontSize: 10, fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        // Slider
+                        SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: 8,
+                            activeTrackColor: sliderColor,
+                            inactiveTrackColor: const Color(0xFFE0D5C8),
+                            thumbColor: sliderColor,
+                            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 12),
+                            overlayColor: sliderColor.withOpacity(0.2),
+                            overlayShape: const RoundSliderOverlayShape(overlayRadius: 20),
+                          ),
+                          child: Slider(
+                            value: _sliderValue,
+                            min: 0,
+                            max: widget.ingredient.maxStock,
+                            divisions: (widget.ingredient.maxStock * 10).toInt(),
+                            onChanged: (value) {
+                              setState(() {
+                                _sliderValue = value;
+                              });
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        // Min/Max labels
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              '0',
+                              style: TextStyle(color: const Color(0xFF8B7355).withOpacity(0.7), fontSize: 10),
+                            ),
+                            Text(
+                              '${widget.ingredient.maxStock} ${widget.ingredient.unit}',
+                              style: TextStyle(color: const Color(0xFF8B7355).withOpacity(0.7), fontSize: 10),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // Change preview
+                  if (_sliderValue != widget.ingredient.currentStock)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: (_sliderValue > widget.ingredient.currentStock ? const Color(0xFFE8F5E9) : const Color(0xFFFFEBEB)),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            _sliderValue > widget.ingredient.currentStock ? Icons.add_circle_outline : Icons.remove_circle_outline,
+                            size: 16,
+                            color: _sliderValue > widget.ingredient.currentStock ? const Color(0xFF4A7C59) : const Color(0xFFD35555),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _sliderValue > widget.ingredient.currentStock
+                                ? '+${(_sliderValue - widget.ingredient.currentStock).toStringAsFixed(1)} ${widget.ingredient.unit}'
+                                : '${(_sliderValue - widget.ingredient.currentStock).toStringAsFixed(1)} ${widget.ingredient.unit}',
+                            style: TextStyle(
+                              color: _sliderValue > widget.ingredient.currentStock ? const Color(0xFF4A7C59) : const Color(0xFFD35555),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  // Apply slider button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _sliderValue != widget.ingredient.currentStock ? _applySliderChange : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF4A7C59),
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: const Color(0xFFE0D5C8),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      child: const Text('Apply Change', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                  
+                  const SizedBox(height: 16),
+                  const Row(children: [
+                      Expanded(child: Divider()),
+                      Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Text("OR", style: TextStyle(fontSize: 10, color: Colors.grey))),
+                      Expanded(child: Divider()),
+                  ]),
+                  const SizedBox(height: 16),
                   
                   // Quick Actions
                   Row(
@@ -1700,16 +2017,10 @@ class _RestockDialogState extends State<_RestockDialog> {
                     ],
                   ),
                    const SizedBox(height: 16),
-                   const Row(children: [
-                        Expanded(child: Divider()),
-                        Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Text("OR", style: TextStyle(fontSize: 10, color: Colors.grey))),
-                        Expanded(child: Divider()),
-                   ]),
-                   const SizedBox(height: 16),
 
                   // Manual Add
                   const Text(
-                    'Add Quantity',
+                    'Add Specific Quantity',
                     style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 8),
@@ -1755,7 +2066,7 @@ class _RestockDialogState extends State<_RestockDialog> {
   }
 }
 
-// Add Product Dialog
+
 class _AddProductDialog extends StatefulWidget {
   final String initialCategory;
   final Function(Product) onAdd;

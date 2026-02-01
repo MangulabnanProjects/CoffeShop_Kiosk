@@ -2,16 +2,19 @@ import '../models/cart.dart';
 
 class Order {
   final String id;
+  final String customerName;
   final List<CartItem> items;
   final double totalAmount;
   final DateTime dateTime;
 
   Order({
     required this.id,
+    required this.customerName,
     required this.items,
     required this.totalAmount,
     required this.dateTime,
   });
+
 
   // Get formatted date
   String get formattedDate {

@@ -1,9 +1,21 @@
 import 'package:flutter/material.dart';
 import 'screens/home_screen.dart';
+import 'services/persistence_service.dart';
+import 'models/product.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await PersistenceService.init();
+  await PersistenceService.loadIngredients();
+  
+  // Load out of stock product IDs
+  final outOfStock = await PersistenceService.loadOutOfStockProducts();
+  outOfStockProductIds.addAll(outOfStock);
+  
   runApp(const CoffeeKioskApp());
 }
+
+
 
 class CoffeeKioskApp extends StatelessWidget {
   const CoffeeKioskApp({super.key});

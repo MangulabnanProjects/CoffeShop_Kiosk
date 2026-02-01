@@ -10,6 +10,7 @@ import '../widgets/product_detail_dialog.dart';
 import '../widgets/cart_dialog.dart';
 import '../widgets/orders_dialog.dart';
 import '../screens/storage_screen.dart';
+import '../services/persistence_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -22,8 +23,37 @@ class _HomeScreenState extends State<HomeScreen> {
   String _selectedCategoryId = '0'; // Default to 'Popular Choice'
   String _searchQuery = '';
   bool _showStorageScreen = false;
-  final Cart _cart = Cart();
-  final OrderHistory _orderHistory = OrderHistory();
+  Cart _cart = Cart();
+  OrderHistory _orderHistory = OrderHistory();
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPersistedData();
+  }
+
+  Future<void> _loadPersistedData() async {
+    final cart = await PersistenceService.loadCart();
+    final orderHistory = await PersistenceService.loadOrders();
+    
+    if (mounted) {
+      setState(() {
+        _cart = cart;
+        _orderHistory = orderHistory;
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _saveCart() async {
+    await PersistenceService.saveCart(_cart);
+  }
+
+  Future<void> _saveOrders() async {
+    await PersistenceService.saveOrders(_orderHistory);
+  }
+
 
   List<Product> get _filteredProducts {
     List<Product> products;
@@ -81,6 +111,9 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _cart.addItem(cartItem);
       });
+      
+      // Save cart to persistence
+      _saveCart();
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -102,17 +135,27 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _cart.clear();
         });
+        // Save cart after clearing
+        _saveCart();
       },
       (itemId) {
         setState(() {
           _cart.removeItem(itemId);
         });
+        // Save cart after removing item
+        _saveCart();
       },
       (order) {
         setState(() {
           _orderHistory.addOrder(order);
           _cart.clear();
         });
+        // Save orders and clear cart persistence
+        _saveOrders();
+        _saveCart();
+        // Also save ingredients (since they were deducted during checkout)
+        PersistenceService.saveIngredients();
+        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Row(
@@ -131,6 +174,7 @@ class _HomeScreenState extends State<HomeScreen> {
       },
     );
   }
+
 
   void _onOrdersTap() {
     showOrdersDialog(context, _orderHistory);

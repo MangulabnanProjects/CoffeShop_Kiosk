@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import '../models/product.dart';
+import '../services/inventory_service.dart';
+
 
 // Add-on model
 class AddOn {
@@ -326,30 +328,55 @@ class _ProductDetailDialogState extends State<ProductDetailDialog> {
                     runSpacing: 6,
                     children: availableAddOns.map((addOn) {
                       final isSelected = _selectedAddOns.contains(addOn.id);
+                      final isAddOnAvailable = inventoryService.isAddOnAvailable(addOn.id);
+                      final unavailableReason = inventoryService.getAddOnUnavailableReason(addOn.id);
+                      
                       return GestureDetector(
-                        onTap: () => _toggleAddOn(addOn.id),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: isSelected ? const Color(0xFF4A7C59) : const Color(0xFFF5F0EB),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: isSelected ? const Color(0xFF4A7C59) : const Color(0xFFE0D5C8),
-                              width: 0.5,
+                        onTap: isAddOnAvailable ? () => _toggleAddOn(addOn.id) : null,
+                        child: Opacity(
+                          opacity: isAddOnAvailable ? 1.0 : 0.5,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: !isAddOnAvailable 
+                                  ? const Color(0xFFE0E0E0)
+                                  : (isSelected ? const Color(0xFF4A7C59) : const Color(0xFFF5F0EB)),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: !isAddOnAvailable 
+                                    ? const Color(0xFFBDBDBD)
+                                    : (isSelected ? const Color(0xFF4A7C59) : const Color(0xFFE0D5C8)),
+                                width: 0.5,
+                              ),
                             ),
-                          ),
-                          child: Text(
-                            '${addOn.name} +₱${addOn.price.toInt()}',
-                            style: TextStyle(
-                              color: isSelected ? Colors.white : const Color(0xFF5A4A3A),
-                              fontSize: 10,
-                              fontWeight: FontWeight.w500,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (!isAddOnAvailable) ...[
+                                  const Icon(Icons.block, size: 10, color: Color(0xFF999999)),
+                                  const SizedBox(width: 3),
+                                ],
+                                Text(
+                                  !isAddOnAvailable 
+                                      ? 'No ${unavailableReason ?? addOn.name}'
+                                      : '${addOn.name} +₱${addOn.price.toInt()}',
+                                  style: TextStyle(
+                                    color: !isAddOnAvailable 
+                                        ? const Color(0xFF999999)
+                                        : (isSelected ? Colors.white : const Color(0xFF5A4A3A)),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w500,
+                                    decoration: !isAddOnAvailable ? TextDecoration.lineThrough : null,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
                       );
                     }).toList(),
                   ),
+
                   const SizedBox(height: 10),
 
                   // Total row

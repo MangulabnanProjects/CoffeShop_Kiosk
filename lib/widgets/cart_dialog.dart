@@ -5,6 +5,11 @@ import '../models/order.dart';
 import '../models/product.dart';
 import '../widgets/product_detail_dialog.dart';
 import '../widgets/cart_item_view_dialog.dart';
+import '../widgets/receipt_dialog.dart';
+import '../widgets/sticker_dialog.dart';
+import '../services/inventory_service.dart';
+
+
 
 class CartDialog extends StatefulWidget {
   final Cart cart;
@@ -26,6 +31,14 @@ class CartDialog extends StatefulWidget {
 
 class _CartDialogState extends State<CartDialog> {
   bool _isProcessingCheckout = false;
+  final TextEditingController _customerNameController = TextEditingController();
+  String? _nameErrorText;
+
+  @override
+  void dispose() {
+    _customerNameController.dispose();
+    super.dispose();
+  }
 
   IconData _getCategoryIcon(String categoryId) {
     switch (categoryId) {
@@ -71,8 +84,18 @@ class _CartDialogState extends State<CartDialog> {
   void _handleCheckout() async {
     if (widget.cart.items.isEmpty) return;
     
+    // Validate customer name
+    final customerName = _customerNameController.text.trim();
+    if (customerName.isEmpty) {
+      setState(() {
+        _nameErrorText = 'Name is required';
+      });
+      return;
+    }
+    
     final order = Order(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
+      customerName: customerName,
       items: List.from(widget.cart.items),
       totalAmount: widget.cart.totalAmount,
       dateTime: DateTime.now(),
@@ -80,13 +103,22 @@ class _CartDialogState extends State<CartDialog> {
 
     setState(() => _isProcessingCheckout = true);
     await Future.delayed(const Duration(milliseconds: 1500));
+    
+    // Deduct ingredients from storage after successful checkout
+    inventoryService.deductForOrder(order);
+    
     widget.onCheckout(order);
     setState(() => _isProcessingCheckout = false);
     
     if (mounted) {
-      Navigator.pop(context);
+      // Close cart dialog and return the order for receipt display
+      Navigator.pop(context, order);
     }
   }
+
+
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -148,6 +180,55 @@ class _CartDialogState extends State<CartDialog> {
                           child: const Icon(Icons.close_rounded, size: 16, color: Colors.white),
                         ),
                       ),
+                    ],
+                  ),
+                ),
+
+                // Customer Name Input
+                Container(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Customer Name',
+                        style: TextStyle(
+                          color: Color(0xFF2C1810),
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _customerNameController,
+                        onChanged: (value) {
+                          if (_nameErrorText != null) {
+                            setState(() => _nameErrorText = null);
+                          }
+                        },
+                        decoration: InputDecoration(
+                          hintText: 'Enter name for callout',
+                          hintStyle: TextStyle(color: const Color(0xFF8B7355).withOpacity(0.5)),
+                          errorText: _nameErrorText,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          fillColor: const Color(0xFFF9F6F3),
+                          filled: true,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide(color: const Color(0xFF4A7C59).withOpacity(0.2)),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide(color: const Color(0xFF4A7C59).withOpacity(0.2)),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: Color(0xFF4A7C59), width: 1.5),
+                          ),
+                          prefixIcon: const Icon(Icons.person_outline_rounded, color: Color(0xFF4A7C59), size: 20),
+                        ),
+                      ),
+                      const Divider(height: 24, color: Color(0xFFE8E0D8)),
                     ],
                   ),
                 ),
@@ -429,8 +510,8 @@ class _CartDialogState extends State<CartDialog> {
 }
 
 // Show the cart dialog
-Future<void> showCartDialog(BuildContext context, Cart cart, Function() onClearCart, Function(String) onRemoveItem, Function(Order) onCheckout) {
-  return showDialog(
+Future<void> showCartDialog(BuildContext context, Cart cart, Function() onClearCart, Function(String) onRemoveItem, Function(Order) onCheckout) async {
+  final result = await showDialog<Order>(
     context: context,
     barrierColor: Colors.black54,
     builder: (context) => CartDialog(
@@ -440,4 +521,15 @@ Future<void> showCartDialog(BuildContext context, Cart cart, Function() onClearC
       onCheckout: onCheckout,
     ),
   );
+  
+  // If checkout was completed
+  if (result != null) {
+    // 1. Show Receipt
+    await showReceiptDialog(context, result);
+    
+    // 2. Show Cup Stickers
+    await showStickerDialog(context, result);
+  }
 }
+
+
