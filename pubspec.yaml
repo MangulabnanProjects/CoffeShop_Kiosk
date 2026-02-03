@@ -36,6 +36,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   shared_preferences: ^2.5.4
   qr_flutter: ^4.1.0
+  print_bluetooth_thermal: ^1.1.1  # Bluetooth thermal printer support
 
 dev_dependencies:
   flutter_test:

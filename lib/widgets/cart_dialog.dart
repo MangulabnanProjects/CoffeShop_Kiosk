@@ -8,7 +8,7 @@ import '../widgets/cart_item_view_dialog.dart';
 import '../widgets/receipt_dialog.dart';
 import '../widgets/sticker_dialog.dart';
 import '../services/inventory_service.dart';
-
+import '../services/print_service.dart';
 
 
 class CartDialog extends StatefulWidget {
@@ -101,14 +101,10 @@ class _CartDialogState extends State<CartDialog> {
       dateTime: DateTime.now(),
     );
 
-    setState(() => _isProcessingCheckout = true);
-    await Future.delayed(const Duration(milliseconds: 1500));
-    
     // Deduct ingredients from storage after successful checkout
     inventoryService.deductForOrder(order);
     
     widget.onCheckout(order);
-    setState(() => _isProcessingCheckout = false);
     
     if (mounted) {
       // Close cart dialog and return the order for receipt display
@@ -315,40 +311,12 @@ class _CartDialogState extends State<CartDialog> {
               ],
             ),
             
-            // Processing checkout overlay
-            if (_isProcessingCheckout)
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.95),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: const Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.print_rounded, size: 50, color: Color(0xFF4A7C59)),
-                      SizedBox(height: 16),
-                      Text(
-                        'Printing Receipt...',
-                        style: TextStyle(color: Color(0xFF4A7C59), fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                      SizedBox(height: 8),
-                      SizedBox(
-                        width: 150,
-                        child: LinearProgressIndicator(
-                          backgroundColor: Color(0xFFE8E0D8),
-                          valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF4A7C59)),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
           ],
         ),
       ),
     );
   }
+
 
   Widget _buildProductGroup(BuildContext context, List<CartItem> items) {
     if (items.length == 1) {
@@ -524,12 +492,111 @@ Future<void> showCartDialog(BuildContext context, Cart cart, Function() onClearC
   
   // If checkout was completed
   if (result != null) {
-    // 1. Show Receipt
+    // Show loading overlay while printing
+    if (PrintService.instance.isConnected) {
+      // Status notifier for the overlay
+      final statusNotifier = ValueNotifier<String>('Printing Receipt...');
+      
+      // Show printing overlay
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => _PrintingOverlay(statusNotifier: statusNotifier),
+      );
+      
+      try {
+        // 1. Print Receipt
+        await PrintService.instance.printReceipt(result);
+        
+        // Update status
+        statusNotifier.value = 'Printing Stickers...';
+        await Future.delayed(const Duration(milliseconds: 500));
+        
+        // 2. Print Stickers
+        await PrintService.instance.printStickers(result);
+        
+        // Small delay before closing
+        await Future.delayed(const Duration(milliseconds: 500));
+      } catch (e) {
+        debugPrint('Error during printing sequence: $e');
+      } finally {
+        // Close printing overlay
+        Navigator.of(context).pop();
+      }
+    }
+    
+    // Show Receipt on screen
     await showReceiptDialog(context, result);
     
-    // 2. Show Cup Stickers
+    // Show Cup Stickers
     await showStickerDialog(context, result);
   }
 }
 
 
+// Printing overlay widget
+class _PrintingOverlay extends StatelessWidget {
+  final ValueNotifier<String> statusNotifier;
+  
+  const _PrintingOverlay({required this.statusNotifier});
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.all(32),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 20,
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.print_rounded, size: 50, color: Color(0xFF4A7C59)),
+            const SizedBox(height: 16),
+            
+            // Dynamic status text
+            ValueListenableBuilder<String>(
+              valueListenable: statusNotifier,
+              builder: (context, status, child) {
+                return Text(
+                  status,
+                  style: const TextStyle(
+                    color: Color(0xFF4A7C59),
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                );
+              },
+            ),
+            
+            const SizedBox(height: 8),
+            const Text(
+              'Please wait',
+              style: TextStyle(
+                color: Color(0xFF8B7355),
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 16),
+            const SizedBox(
+              width: 150,
+              child: LinearProgressIndicator(
+                backgroundColor: Color(0xFFE8E0D8),
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF4A7C59)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

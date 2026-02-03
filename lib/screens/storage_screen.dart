@@ -958,16 +958,71 @@ class _StorageScreenState extends State<StorageScreen> {
     final isWaffle = product.categoryId == '7';
     final sizeLabel = isWaffle ? 'Small / Large' : '16oz / 22oz';
     
-    return Opacity(
-      opacity: isOutOfStock ? 0.6 : 1.0,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: isOutOfStock ? const Color(0xFFF0F0F0) : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
-        ),
-        child: Column(
+    return GestureDetector(
+      onDoubleTap: () {
+        if (isOutOfStock) {
+          // Delete the out-of-stock item with confirmation
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Delete Product'),
+              content: Text('Are you sure you want to delete "${product.name}"?'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      sampleProducts.removeWhere((p) => p.id == product.id);
+                      outOfStockProductIds.remove(product.id);
+                    });
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('"${product.name}" deleted'),
+                        backgroundColor: const Color(0xFFD35555),
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    );
+                  },
+                  child: const Text('Delete', style: TextStyle(color: Colors.red)),
+                ),
+              ],
+            ),
+          );
+        } else {
+          // Open edit dialog for normal items
+          showDialog(
+            context: context,
+            builder: (context) => _EditProductDialog(
+              product: product,
+              onSave: (updatedProduct) {
+                setState(() {
+                  final index = sampleProducts.indexWhere((p) => p.id == product.id);
+                  if (index != -1) {
+                    sampleProducts[index] = updatedProduct;
+                  }
+                });
+              },
+            ),
+          );
+        }
+      },
+
+      child: Opacity(
+        opacity: isOutOfStock ? 0.6 : 1.0,
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isOutOfStock ? const Color(0xFFF0F0F0) : Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
+          ),
+          child: Column(
+
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Product Image placeholder with delete button
@@ -1067,8 +1122,10 @@ class _StorageScreenState extends State<StorageScreen> {
           ],
         ),
       ),
+      ),
     );
   }
+
 
   Widget _buildBadge(String text, Color color) {
     return Container(
@@ -2089,6 +2146,13 @@ class _AddProductDialogState extends State<_AddProductDialog> {
 
   final List<String> _productCategories = ['Iced Coffee', 'Hot Coffee', 'Milk Tea', 'Frappe', 'Fruities', 'Waffles'];
 
+  // New state for image and ingredients
+  String? _selectedImagePath;
+  final Map<String, double> _ingredientsTall = {}; // 16oz ingredients
+  final Map<String, double> _ingredientsGrande = {}; // 22oz ingredients
+  String? _validationError;
+
+
   @override
   void initState() {
     super.initState();
@@ -2128,15 +2192,56 @@ class _AddProductDialogState extends State<_AddProductDialog> {
     }
   }
 
+  void _showIngredientPicker() {
+    showDialog(
+      context: context,
+      builder: (context) => _IngredientPickerDialog(
+        alreadySelected: _ingredientsTall.keys.toList(),
+        onSelect: (ingredientName, amount16, amount22) {
+          setState(() {
+            // Add ingredient to both sizes with their respective amounts
+            if (amount16 > 0) _ingredientsTall[ingredientName] = amount16;
+            if (amount22 > 0) _ingredientsGrande[ingredientName] = amount22;
+            _validationError = null;
+          });
+        },
+      ),
+    );
+  }
+
+  void _removeIngredient(String name) {
+    setState(() {
+      // Remove from both size maps
+      _ingredientsTall.remove(name);
+      _ingredientsGrande.remove(name);
+    });
+  }
+
+
+  String _getIngredientUnit(String name) {
+    final ingredient = sampleIngredients.firstWhere(
+      (i) => i.name == name,
+      orElse: () => sampleIngredients.first,
+    );
+    return ingredient.smallUnit;
+  }
+
   void _handleAdd() {
     final name = _nameController.text.trim();
     final price16 = double.tryParse(_price16Controller.text) ?? 0;
     final price22 = double.tryParse(_price22Controller.text) ?? 0;
     
-    if (name.isEmpty || price16 <= 0 || price22 <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in name and both prices')),
-      );
+    // Validation
+    if (name.isEmpty) {
+      setState(() => _validationError = 'Please enter a product name');
+      return;
+    }
+    if (price16 <= 0 || price22 <= 0) {
+      setState(() => _validationError = 'Please enter valid prices for both sizes');
+      return;
+    }
+    if (_ingredientsTall.isEmpty && _ingredientsGrande.isEmpty) {
+      setState(() => _validationError = 'Please add ingredients for at least one size');
       return;
     }
 
@@ -2147,6 +2252,9 @@ class _AddProductDialogState extends State<_AddProductDialog> {
       priceTall: price16,
       priceGrande: price22,
       description: _descController.text.trim(),
+      imagePath: _selectedImagePath,
+      ingredientsTall: Map.from(_ingredientsTall),
+      ingredientsGrande: Map.from(_ingredientsGrande),
     );
 
     widget.onAdd(product);
@@ -2158,7 +2266,10 @@ class _AddProductDialogState extends State<_AddProductDialog> {
     return Dialog(
       backgroundColor: Colors.transparent,
       child: Container(
-        width: 420,
+        width: 480,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
@@ -2204,166 +2315,1136 @@ class _AddProductDialogState extends State<_AddProductDialog> {
               ),
             ),
             
-            // Content
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Category Selector
-                  const Text('Category', style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF5F0EB),
-                      borderRadius: BorderRadius.circular(10),
+            // Content - Scrollable
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Category Selector
+                    const Text('Category', style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF5F0EB),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: _selectedCategory,
+                          isExpanded: true,
+                          icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF8B7355)),
+                          items: _productCategories.map((cat) => DropdownMenuItem(
+                            value: cat,
+                            child: Row(
+                              children: [
+                                Icon(_getCategoryIcon(cat), size: 18, color: const Color(0xFF8B7355)),
+                                const SizedBox(width: 10),
+                                Text(cat, style: const TextStyle(color: Color(0xFF2C1810))),
+                              ],
+                            ),
+                          )).toList(),
+                          onChanged: (value) {
+                            if (value != null) setState(() => _selectedCategory = value);
+                          },
+                        ),
+                      ),
                     ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: _selectedCategory,
-                        isExpanded: true,
-                        icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF8B7355)),
-                        items: _productCategories.map((cat) => DropdownMenuItem(
-                          value: cat,
-                          child: Row(
+                    const SizedBox(height: 16),
+
+                    // Image Upload (Optional)
+                    const Text('Product Image (optional)', style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    GestureDetector(
+                      onTap: () {
+                        // For now, just show a placeholder message
+                        // In a full implementation, you'd use file_picker or image_picker
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Image upload will use device file picker'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                      child: Container(
+                        height: 80,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF5F0EB),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFE8E0D8), style: BorderStyle.solid),
+                        ),
+                        child: _selectedImagePath != null
+                            ? Row(
+                                children: [
+                                  const SizedBox(width: 16),
+                                  Container(
+                                    width: 60,
+                                    height: 60,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF4A7C59).withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Icon(Icons.image, color: Color(0xFF4A7C59), size: 30),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  const Expanded(child: Text('Image selected', style: TextStyle(color: Color(0xFF4A7C59)))),
+                                  IconButton(
+                                    icon: const Icon(Icons.close, size: 18, color: Color(0xFF8B7355)),
+                                    onPressed: () => setState(() => _selectedImagePath = null),
+                                  ),
+                                ],
+                              )
+                            : const Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.add_photo_alternate_rounded, color: Color(0xFF8B7355), size: 28),
+                                    SizedBox(height: 4),
+                                    Text('Click to add image', style: TextStyle(color: Color(0xFF8B7355), fontSize: 12)),
+                                  ],
+                                ),
+                              ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Name
+                    const Text('Item Name *', style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _nameController,
+                      decoration: InputDecoration(
+                        hintText: 'Enter product name',
+                        hintStyle: TextStyle(color: const Color(0xFF8B7355).withOpacity(0.6)),
+                        filled: true,
+                        fillColor: const Color(0xFFF5F0EB),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      ),
+                      onChanged: (_) => setState(() => _validationError = null),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Description
+                    const Text('Description (optional)', style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _descController,
+                      maxLines: 2,
+                      decoration: InputDecoration(
+                        hintText: 'Enter description',
+                        hintStyle: TextStyle(color: const Color(0xFF8B7355).withOpacity(0.6)),
+                        filled: true,
+                        fillColor: const Color(0xFFF5F0EB),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Prices
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(_getCategoryIcon(cat), size: 18, color: const Color(0xFF8B7355)),
-                              const SizedBox(width: 10),
-                              Text(cat, style: const TextStyle(color: Color(0xFF2C1810))),
+                              const Text('Price (16oz) *', style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 8),
+                              TextField(
+                                controller: _price16Controller,
+                                keyboardType: TextInputType.number,
+                                decoration: InputDecoration(
+                                  hintText: '₱0',
+                                  prefixText: '₱',
+                                  hintStyle: TextStyle(color: const Color(0xFF8B7355).withOpacity(0.6)),
+                                  filled: true,
+                                  fillColor: const Color(0xFFF5F0EB),
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                ),
+                                onChanged: (_) => setState(() => _validationError = null),
+                              ),
                             ],
                           ),
-                        )).toList(),
-                        onChanged: (value) {
-                          if (value != null) setState(() => _selectedCategory = value);
-                        },
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Name
-                  const Text('Item Name', style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _nameController,
-                    decoration: InputDecoration(
-                      hintText: 'Enter product name',
-                      hintStyle: TextStyle(color: const Color(0xFF8B7355).withOpacity(0.6)),
-                      filled: true,
-                      fillColor: const Color(0xFFF5F0EB),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Description
-                  const Text('Description (optional)', style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _descController,
-                    maxLines: 2,
-                    decoration: InputDecoration(
-                      hintText: 'Enter description',
-                      hintStyle: TextStyle(color: const Color(0xFF8B7355).withOpacity(0.6)),
-                      filled: true,
-                      fillColor: const Color(0xFFF5F0EB),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Prices
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Price (16oz)', style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600)),
-                            const SizedBox(height: 8),
-                            TextField(
-                              controller: _price16Controller,
-                              keyboardType: TextInputType.number,
-                              decoration: InputDecoration(
-                                hintText: '₱0',
-                                prefixText: '₱',
-                                hintStyle: TextStyle(color: const Color(0xFF8B7355).withOpacity(0.6)),
-                                filled: true,
-                                fillColor: const Color(0xFFF5F0EB),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Price (22oz) *', style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 8),
+                              TextField(
+                                controller: _price22Controller,
+                                keyboardType: TextInputType.number,
+                                decoration: InputDecoration(
+                                  hintText: '₱0',
+                                  prefixText: '₱',
+                                  hintStyle: TextStyle(color: const Color(0xFF8B7355).withOpacity(0.6)),
+                                  filled: true,
+                                  fillColor: const Color(0xFFF5F0EB),
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                ),
+                                onChanged: (_) => setState(() => _validationError = null),
                               ),
-                            ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Ingredients Section
+                    Row(
+                      children: [
+                        const Text('Ingredients *', style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600)),
+                        const SizedBox(width: 8),
+                        Text('(${_ingredientsTall.length} added)', style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    
+                    // Ingredients List showing both 16oz and 22oz amounts
+                    if (_ingredientsTall.isNotEmpty)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: _ingredientsTall.keys.map((name) {
+                            final unit = _getIngredientUnit(name);
+                            final amt16 = _ingredientsTall[name] ?? 0;
+                            final amt22 = _ingredientsGrande[name] ?? 0;
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF4A7C59).withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFF4A7C59).withOpacity(0.3)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        name,
+                                        style: const TextStyle(color: Color(0xFF4A7C59), fontSize: 12, fontWeight: FontWeight.w600),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '16oz: ${amt16.toStringAsFixed(amt16 == amt16.toInt() ? 0 : 1)}$unit | 22oz: ${amt22.toStringAsFixed(amt22 == amt22.toInt() ? 0 : 1)}$unit',
+                                        style: TextStyle(color: const Color(0xFF4A7C59).withOpacity(0.8), fontSize: 10),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(width: 8),
+                                  GestureDetector(
+                                    onTap: () => _removeIngredient(name),
+                                    child: const Icon(Icons.close, size: 16, color: Color(0xFF4A7C59)),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    
+                    // Add Ingredient Button
+                    GestureDetector(
+                      onTap: _showIngredientPicker,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF5F0EB),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFE8E0D8)),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.add_rounded, color: Color(0xFF4A7C59), size: 20),
+                            SizedBox(width: 8),
+                            Text('Add Ingredient', style: TextStyle(color: Color(0xFF4A7C59), fontWeight: FontWeight.w600)),
                           ],
                         ),
                       ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                    ),
+
+
+                    
+                    // Validation Error
+                    if (_validationError != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFEBEB),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
                           children: [
-                            const Text('Price (22oz)', style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600)),
-                            const SizedBox(height: 8),
-                            TextField(
-                              controller: _price22Controller,
-                              keyboardType: TextInputType.number,
-                              decoration: InputDecoration(
-                                hintText: '₱0',
-                                prefixText: '₱',
-                                hintStyle: TextStyle(color: const Color(0xFF8B7355).withOpacity(0.6)),
-                                filled: true,
-                                fillColor: const Color(0xFFF5F0EB),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                              ),
+                            const Icon(Icons.warning_rounded, color: Color(0xFFD35555), size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(_validationError!, style: const TextStyle(color: Color(0xFFD35555), fontSize: 12)),
                             ),
                           ],
                         ),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 24),
+                    
+                    const SizedBox(height: 20),
 
-                  // Buttons
-                  Row(
-                    children: [
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => Navigator.pop(context),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF5F0EB),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: const Center(
-                              child: Text('Cancel', style: TextStyle(color: Color(0xFF8B7355), fontWeight: FontWeight.w600)),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: _handleAdd,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF4A7C59),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: const Center(
-                              child: Text('Add Item', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                    // Buttons
+                    Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => Navigator.pop(context),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF5F0EB),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Center(
+                                child: Text('Cancel', style: TextStyle(color: Color(0xFF8B7355), fontWeight: FontWeight.w600)),
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: _handleAdd,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF4A7C59),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Center(
+                                child: Text('Add Item', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Ingredient Picker Dialog with Search
+class _IngredientPickerDialog extends StatefulWidget {
+  final List<String> alreadySelected;
+  final Function(String ingredientName, double amount16, double amount22) onSelect;
+
+  const _IngredientPickerDialog({
+    required this.alreadySelected,
+    required this.onSelect,
+  });
+
+  @override
+  State<_IngredientPickerDialog> createState() => _IngredientPickerDialogState();
+}
+
+class _IngredientPickerDialogState extends State<_IngredientPickerDialog> {
+  String _searchQuery = '';
+  Ingredient? _selectedIngredient;
+  final TextEditingController _amount16Controller = TextEditingController();
+  final TextEditingController _amount22Controller = TextEditingController();
+  String? _amountError;
+
+  List<Ingredient> get _filteredIngredients {
+    var items = sampleIngredients.where((i) => !widget.alreadySelected.contains(i.name)).toList();
+    if (_searchQuery.isNotEmpty) {
+      items = items.where((i) => i.name.toLowerCase().contains(_searchQuery.toLowerCase())).toList();
+    }
+    return items;
+  }
+
+  Map<String, List<Ingredient>> get _groupedIngredients {
+    final map = <String, List<Ingredient>>{};
+    for (var ingredient in _filteredIngredients) {
+      map.putIfAbsent(ingredient.category, () => []).add(ingredient);
+    }
+    return map;
+  }
+
+  void _handleConfirm() {
+    if (_selectedIngredient == null) return;
+    
+    final amount16 = double.tryParse(_amount16Controller.text) ?? 0;
+    final amount22 = double.tryParse(_amount22Controller.text) ?? 0;
+    
+    if (amount16 <= 0 && amount22 <= 0) {
+      setState(() => _amountError = 'Enter at least one valid amount');
+      return;
+    }
+
+    widget.onSelect(_selectedIngredient!.name, amount16, amount22);
+    Navigator.pop(context);
+  }
+
+  @override
+  void dispose() {
+    _amount16Controller.dispose();
+    _amount22Controller.dispose();
+    super.dispose();
+  }
+
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        width: 400,
+        height: 500,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: const BoxDecoration(
+                color: Color(0xFF4A7C59),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.inventory_2_rounded, color: Colors.white, size: 20),
+                  const SizedBox(width: 8),
+                  const Text('Select Ingredient', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: const Icon(Icons.close_rounded, size: 20, color: Colors.white),
                   ),
                 ],
+              ),
+            ),
+            
+            // Search
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: TextField(
+                onChanged: (v) => setState(() => _searchQuery = v),
+                decoration: InputDecoration(
+                  hintText: 'Search ingredients...',
+                  hintStyle: const TextStyle(color: Color(0xFF8B7355), fontSize: 13),
+                  prefixIcon: const Icon(Icons.search, color: Color(0xFF8B7355), size: 20),
+                  filled: true,
+                  fillColor: const Color(0xFFF5F0EB),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                ),
+              ),
+            ),
+            
+            // Ingredient list or amount input
+            Expanded(
+              child: _selectedIngredient == null
+                  ? ListView(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      children: _groupedIngredients.entries.map((group) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Text(
+                                group.key,
+                                style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11, fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                            ...group.value.map((ing) => GestureDetector(
+                              onTap: () => setState(() {
+                                _selectedIngredient = ing;
+                                _amount16Controller.clear();
+                                _amount22Controller.clear();
+                                _amountError = null;
+                              }),
+
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 6),
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF5F0EB),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(ing.name, style: const TextStyle(color: Color(0xFF2C1810), fontSize: 13)),
+                                    ),
+                                    Text(
+                                      '${ing.currentStock.toStringAsFixed(1)} ${ing.unit}',
+                                      style: TextStyle(
+                                        color: ing.isLowStock ? const Color(0xFFD35555) : const Color(0xFF8B7355),
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )).toList(),
+                          ],
+                        );
+                      }).toList(),
+                    )
+                  : Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Back button
+                          GestureDetector(
+                            onTap: () => setState(() => _selectedIngredient = null),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.arrow_back_rounded, size: 18, color: Color(0xFF8B7355)),
+                                const SizedBox(width: 6),
+                                Text('Back to list', style: TextStyle(color: const Color(0xFF8B7355).withOpacity(0.8), fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          
+                          // Selected ingredient
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF5F0EB),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _selectedIngredient!.name,
+                                  style: const TextStyle(color: Color(0xFF2C1810), fontSize: 18, fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Available: ${_selectedIngredient!.currentStock.toStringAsFixed(1)} ${_selectedIngredient!.unit} (${_selectedIngredient!.formattedSmallCurrent} ${_selectedIngredient!.smallUnit})',
+                                  style: const TextStyle(color: Color(0xFF8B7355), fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          
+                          // Amount inputs for 16oz and 22oz
+                          Text(
+                            'Amount to deduct per order (${_selectedIngredient!.smallUnit})',
+                            style: const TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              // 16oz input
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '16oz',
+                                      style: TextStyle(
+                                        color: const Color(0xFF4A7C59),
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    TextField(
+                                      controller: _amount16Controller,
+                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                      decoration: InputDecoration(
+                                        hintText: '0',
+                                        suffixText: _selectedIngredient!.smallUnit,
+                                        suffixStyle: const TextStyle(color: Color(0xFF8B7355), fontSize: 12),
+                                        filled: true,
+                                        fillColor: Colors.white,
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(10),
+                                          borderSide: const BorderSide(color: Color(0xFFE8E0D8)),
+                                        ),
+                                        enabledBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(10),
+                                          borderSide: const BorderSide(color: Color(0xFFE8E0D8)),
+                                        ),
+                                        focusedBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(10),
+                                          borderSide: const BorderSide(color: Color(0xFF4A7C59), width: 1.5),
+                                        ),
+                                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                      ),
+                                      onChanged: (_) => setState(() => _amountError = null),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              // 22oz input
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '22oz',
+                                      style: TextStyle(
+                                        color: const Color(0xFF8B7355),
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    TextField(
+                                      controller: _amount22Controller,
+                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                      decoration: InputDecoration(
+                                        hintText: '0',
+                                        suffixText: _selectedIngredient!.smallUnit,
+                                        suffixStyle: const TextStyle(color: Color(0xFF8B7355), fontSize: 12),
+                                        filled: true,
+                                        fillColor: Colors.white,
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(10),
+                                          borderSide: const BorderSide(color: Color(0xFFE8E0D8)),
+                                        ),
+                                        enabledBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(10),
+                                          borderSide: const BorderSide(color: Color(0xFFE8E0D8)),
+                                        ),
+                                        focusedBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(10),
+                                          borderSide: const BorderSide(color: Color(0xFF8B7355), width: 1.5),
+                                        ),
+                                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                      ),
+                                      onChanged: (_) => setState(() => _amountError = null),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (_amountError != null) ...[
+                            const SizedBox(height: 6),
+                            Text(_amountError!, style: const TextStyle(color: Color(0xFFD35555), fontSize: 11)),
+                          ],
+                          const SizedBox(height: 14),
+                          
+                          // Hint text
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE3F2FD),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.info_outline, size: 16, color: Color(0xFF1976D2)),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Enter deduction for each size (e.g., 150${_selectedIngredient!.smallUnit} for 16oz, 200${_selectedIngredient!.smallUnit} for 22oz)',
+                                    style: const TextStyle(color: Color(0xFF1976D2), fontSize: 11),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          
+                          const Spacer(),
+                          
+                          // Confirm button
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: _handleConfirm,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF4A7C59),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              child: const Text('Add Ingredient', style: TextStyle(fontWeight: FontWeight.bold)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Edit Product Dialog - for editing existing menu items
+class _EditProductDialog extends StatefulWidget {
+  final Product product;
+  final Function(Product) onSave;
+
+  const _EditProductDialog({
+    required this.product,
+    required this.onSave,
+  });
+
+  @override
+  State<_EditProductDialog> createState() => _EditProductDialogState();
+}
+
+class _EditProductDialogState extends State<_EditProductDialog> {
+  late String _selectedCategory;
+  late TextEditingController _nameController;
+  late TextEditingController _descController;
+  late TextEditingController _price16Controller;
+  late TextEditingController _price22Controller;
+  
+  String? _selectedImagePath;
+  late Map<String, double> _ingredientsTall;
+  late Map<String, double> _ingredientsGrande;
+  String? _validationError;
+
+  final List<String> _productCategories = ['Iced Coffee', 'Hot Coffee', 'Milk Tea', 'Frappe', 'Fruities', 'Waffles'];
+
+  @override
+  void initState() {
+    super.initState();
+    // Pre-fill with existing product data
+    _nameController = TextEditingController(text: widget.product.name);
+    _descController = TextEditingController(text: widget.product.description);
+    _price16Controller = TextEditingController(text: widget.product.priceTall.toStringAsFixed(0));
+    _price22Controller = TextEditingController(text: widget.product.priceGrande.toStringAsFixed(0));
+    _selectedCategory = _getCategoryNameFromId(widget.product.categoryId);
+    _selectedImagePath = widget.product.imagePath;
+    _ingredientsTall = Map.from(widget.product.ingredientsTall);
+    _ingredientsGrande = Map.from(widget.product.ingredientsGrande);
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _descController.dispose();
+    _price16Controller.dispose();
+    _price22Controller.dispose();
+    super.dispose();
+  }
+
+  String _getCategoryNameFromId(String id) {
+    switch (id) {
+      case '1': return 'Hot Coffee';
+      case '2': return 'Iced Coffee';
+      case '3': return 'Milk Tea';
+      case '4': return 'Frappe';
+      case '5': return 'Fruities';
+      case '7': return 'Waffles';
+      default: return 'Iced Coffee';
+    }
+  }
+
+  String _getCategoryIdFromName(String name) {
+    switch (name) {
+      case 'Iced Coffee': return '2';
+      case 'Hot Coffee': return '1';
+      case 'Milk Tea': return '3';
+      case 'Frappe': return '4';
+      case 'Fruities': return '5';
+      case 'Waffles': return '7';
+      default: return '2';
+    }
+  }
+
+  IconData _getCategoryIcon(String category) {
+    switch (category) {
+      case 'Iced Coffee': return Icons.coffee_rounded;
+      case 'Hot Coffee': return Icons.local_cafe_rounded;
+      case 'Milk Tea': return Icons.local_drink_rounded;
+      case 'Frappe': return Icons.ac_unit_rounded;
+      case 'Fruities': return Icons.local_florist_rounded;
+      case 'Waffles': return Icons.breakfast_dining_rounded;
+      default: return Icons.fastfood_rounded;
+    }
+  }
+
+  void _showIngredientPicker() {
+    showDialog(
+      context: context,
+      builder: (context) => _IngredientPickerDialog(
+        alreadySelected: _ingredientsTall.keys.toList(),
+        onSelect: (ingredientName, amount16, amount22) {
+          setState(() {
+            // Add ingredient to both sizes with their respective amounts
+            if (amount16 > 0) _ingredientsTall[ingredientName] = amount16;
+            if (amount22 > 0) _ingredientsGrande[ingredientName] = amount22;
+            _validationError = null;
+          });
+        },
+      ),
+    );
+  }
+
+  void _removeIngredient(String name) {
+    setState(() {
+      // Remove from both size maps
+      _ingredientsTall.remove(name);
+      _ingredientsGrande.remove(name);
+    });
+  }
+
+  String _getIngredientUnit(String name) {
+
+    final ingredient = sampleIngredients.firstWhere(
+      (i) => i.name == name,
+      orElse: () => sampleIngredients.first,
+    );
+    return ingredient.smallUnit;
+  }
+
+  void _handleSave() {
+    final name = _nameController.text.trim();
+    final price16 = double.tryParse(_price16Controller.text) ?? 0;
+    final price22 = double.tryParse(_price22Controller.text) ?? 0;
+    
+    if (name.isEmpty) {
+      setState(() => _validationError = 'Please enter a product name');
+      return;
+    }
+    if (price16 <= 0 || price22 <= 0) {
+      setState(() => _validationError = 'Please enter valid prices for both sizes');
+      return;
+    }
+    if (_ingredientsTall.isEmpty && _ingredientsGrande.isEmpty) {
+      setState(() => _validationError = 'Please add ingredients for at least one size');
+      return;
+    }
+
+    final updatedProduct = widget.product.copyWith(
+      name: name,
+      categoryId: _getCategoryIdFromName(_selectedCategory),
+      priceTall: price16,
+      priceGrande: price22,
+      description: _descController.text.trim(),
+      imagePath: _selectedImagePath,
+      ingredientsTall: Map.from(_ingredientsTall),
+      ingredientsGrande: Map.from(_ingredientsGrande),
+    );
+
+    widget.onSave(updatedProduct);
+    Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        width: 500,
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 20, offset: const Offset(0, 10))],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: const BoxDecoration(
+                color: Color(0xFF8B7355),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.edit_rounded, color: Colors.white, size: 22),
+                  const SizedBox(width: 10),
+                  const Text('Edit Menu Item', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), shape: BoxShape.circle),
+                      child: const Icon(Icons.close_rounded, size: 18, color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            
+            // Content - Scrollable
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Category Selector
+                    const Text('Category', style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      decoration: BoxDecoration(color: const Color(0xFFF5F0EB), borderRadius: BorderRadius.circular(10)),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: _selectedCategory,
+                          isExpanded: true,
+                          icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF8B7355)),
+                          items: _productCategories.map((cat) => DropdownMenuItem(
+                            value: cat,
+                            child: Row(
+                              children: [
+                                Icon(_getCategoryIcon(cat), size: 18, color: const Color(0xFF8B7355)),
+                                const SizedBox(width: 10),
+                                Text(cat, style: const TextStyle(color: Color(0xFF2C1810))),
+                              ],
+                            ),
+                          )).toList(),
+                          onChanged: (value) {
+                            if (value != null) setState(() => _selectedCategory = value);
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Name
+                    const Text('Item Name *', style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _nameController,
+                      decoration: InputDecoration(
+                        hintText: 'Enter product name',
+                        hintStyle: TextStyle(color: const Color(0xFF8B7355).withOpacity(0.6)),
+                        filled: true,
+                        fillColor: const Color(0xFFF5F0EB),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      ),
+                      onChanged: (_) => setState(() => _validationError = null),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Description
+                    const Text('Description', style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _descController,
+                      maxLines: 2,
+                      decoration: InputDecoration(
+                        hintText: 'Enter description',
+                        hintStyle: TextStyle(color: const Color(0xFF8B7355).withOpacity(0.6)),
+                        filled: true,
+                        fillColor: const Color(0xFFF5F0EB),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Prices
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Price (16oz) *', style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 8),
+                              TextField(
+                                controller: _price16Controller,
+                                keyboardType: TextInputType.number,
+                                decoration: InputDecoration(
+                                  hintText: '₱0',
+                                  prefixText: '₱',
+                                  hintStyle: TextStyle(color: const Color(0xFF8B7355).withOpacity(0.6)),
+                                  filled: true,
+                                  fillColor: const Color(0xFFF5F0EB),
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                ),
+                                onChanged: (_) => setState(() => _validationError = null),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Price (22oz) *', style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 8),
+                              TextField(
+                                controller: _price22Controller,
+                                keyboardType: TextInputType.number,
+                                decoration: InputDecoration(
+                                  hintText: '₱0',
+                                  prefixText: '₱',
+                                  hintStyle: TextStyle(color: const Color(0xFF8B7355).withOpacity(0.6)),
+                                  filled: true,
+                                  fillColor: const Color(0xFFF5F0EB),
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                ),
+                                onChanged: (_) => setState(() => _validationError = null),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Ingredients Section
+                    Row(
+                      children: [
+                        const Text('Ingredients *', style: TextStyle(color: Color(0xFF5A4A3A), fontSize: 12, fontWeight: FontWeight.w600)),
+                        const SizedBox(width: 8),
+                        Text('(${_ingredientsTall.length} added)', style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    
+                    // Ingredients List showing both 16oz and 22oz amounts
+                    if (_ingredientsTall.isNotEmpty)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: _ingredientsTall.keys.map((name) {
+                            final unit = _getIngredientUnit(name);
+                            final amt16 = _ingredientsTall[name] ?? 0;
+                            final amt22 = _ingredientsGrande[name] ?? 0;
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF4A7C59).withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFF4A7C59).withOpacity(0.3)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        name,
+                                        style: const TextStyle(color: Color(0xFF4A7C59), fontSize: 12, fontWeight: FontWeight.w600),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '16oz: ${amt16.toStringAsFixed(amt16 == amt16.toInt() ? 0 : 1)}$unit | 22oz: ${amt22.toStringAsFixed(amt22 == amt22.toInt() ? 0 : 1)}$unit',
+                                        style: TextStyle(color: const Color(0xFF4A7C59).withOpacity(0.8), fontSize: 10),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(width: 8),
+                                  GestureDetector(
+                                    onTap: () => _removeIngredient(name),
+                                    child: const Icon(Icons.close, size: 16, color: Color(0xFF4A7C59)),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    
+                    // Add Ingredient Button
+                    GestureDetector(
+                      onTap: _showIngredientPicker,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF5F0EB),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFE8E0D8)),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.add_rounded, color: Color(0xFF4A7C59), size: 20),
+                            SizedBox(width: 8),
+                            Text('Add Ingredient', style: TextStyle(color: Color(0xFF4A7C59), fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    
+                    // Validation Error
+                    if (_validationError != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(color: const Color(0xFFFFEBEB), borderRadius: BorderRadius.circular(8)),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.warning_rounded, color: Color(0xFFD35555), size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(child: Text(_validationError!, style: const TextStyle(color: Color(0xFFD35555), fontSize: 12))),
+                          ],
+                        ),
+                      ),
+                    ],
+                    
+                    const SizedBox(height: 20),
+
+                    // Buttons
+                    Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => Navigator.pop(context),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              decoration: BoxDecoration(color: const Color(0xFFF5F0EB), borderRadius: BorderRadius.circular(10)),
+                              child: const Center(child: Text('Cancel', style: TextStyle(color: Color(0xFF8B7355), fontWeight: FontWeight.w600))),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: _handleSave,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              decoration: BoxDecoration(color: const Color(0xFF8B7355), borderRadius: BorderRadius.circular(10)),
+                              child: const Center(child: Text('Save Changes', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600))),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ],

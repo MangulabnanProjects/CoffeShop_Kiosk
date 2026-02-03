@@ -82,13 +82,6 @@ class StorageSidePanel extends StatelessWidget {
                     isSelected: selectedItem == 'change_menu',
                     onTap: () => onItemSelected('change_menu'),
                   ),
-                  const SizedBox(height: 6),
-                  _buildNavItem(
-                    icon: Icons.calculate_rounded,
-                    label: 'Calculator',
-                    isSelected: selectedItem == 'calculator',
-                    onTap: () => onItemSelected('calculator'),
-                  ),
                 ],
               ),
             ),

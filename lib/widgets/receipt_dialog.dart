@@ -3,6 +3,9 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../models/order.dart';
 import '../models/cart.dart';
 
+// 58mm thermal printer receipt width (approximately 218px at 96dpi)
+// Characters per line: ~32 for standard thermal font
+const double receiptWidth = 218.0;
 
 class ReceiptDialog extends StatelessWidget {
   final Order order;
@@ -11,17 +14,16 @@ class ReceiptDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
 
     return Dialog(
       backgroundColor: Colors.transparent,
       child: Container(
-        width: screenWidth * 0.35,
-        constraints: BoxConstraints(maxHeight: screenHeight * 0.85),
+        width: receiptWidth,
+        constraints: BoxConstraints(maxHeight: screenHeight * 0.9),
         decoration: BoxDecoration(
           color: const Color(0xFFFFFDF5), // Receipt paper color
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(4),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.3),
@@ -36,74 +38,69 @@ class ReceiptDialog extends StatelessWidget {
             // Receipt content
             Flexible(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     // ===== HEADER =====
-                    // Store name
                     const Text(
                       'Mr. Buenaz',
                       style: TextStyle(
                         fontFamily: 'Courier',
-                        fontSize: 28,
+                        fontSize: 18,
                         fontWeight: FontWeight.bold,
                         color: Color(0xFF2C1810),
-                        letterSpacing: 2,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    
-                    // Address
-                    const Text(
-                      'Located at Brgy. Buenavista\nMagdalena, Laguna',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontFamily: 'Courier',
-                        fontSize: 11,
-                        color: Color(0xFF5A4A3A),
-                        height: 1.4,
+                        letterSpacing: 1,
                       ),
                     ),
                     const SizedBox(height: 4),
+                    
+                    // Address
                     const Text(
-                      'beside Gupit Tope Barber Shop',
+                      'Brgy. Buenavista\nMagdalena, Laguna',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontFamily: 'Courier',
-                        fontSize: 10,
+                        fontSize: 8,
+                        color: Color(0xFF5A4A3A),
+                        height: 1.3,
+                      ),
+                    ),
+                    const Text(
+                      'beside Gupit Tope Barber',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontFamily: 'Courier',
+                        fontSize: 7,
                         color: Color(0xFF8B7355),
                         fontStyle: FontStyle.italic,
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 3),
                     
-                    // Phone number
+                    // Phone
                     const Text(
                       'Tel: 0917-123-4567',
                       style: TextStyle(
                         fontFamily: 'Courier',
-                        fontSize: 11,
+                        fontSize: 8,
                         color: Color(0xFF5A4A3A),
                       ),
                     ),
                     
-                    const SizedBox(height: 12),
-                    
-                    // Dashed line
-                    _buildDashedLine(),
-                    
                     const SizedBox(height: 8),
+                    _buildDashedLine(),
+                    const SizedBox(height: 6),
                     
-                    // Order info
+                    // Order info row
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          'Order #${order.id.substring(order.id.length - 6)}',
+                          '#${order.id.substring(order.id.length - 6)}',
                           style: const TextStyle(
                             fontFamily: 'Courier',
-                            fontSize: 10,
+                            fontSize: 8,
                             color: Color(0xFF5A4A3A),
                           ),
                         ),
@@ -111,7 +108,7 @@ class ReceiptDialog extends StatelessWidget {
                           order.formattedTime,
                           style: const TextStyle(
                             fontFamily: 'Courier',
-                            fontSize: 10,
+                            fontSize: 8,
                             color: Color(0xFF5A4A3A),
                           ),
                         ),
@@ -121,61 +118,43 @@ class ReceiptDialog extends StatelessWidget {
                       order.fullDateString,
                       style: const TextStyle(
                         fontFamily: 'Courier',
-                        fontSize: 10,
+                        fontSize: 7,
                         color: Color(0xFF8B7355),
                       ),
                     ),
                     
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     
-                    // Customer Name for Callout
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: const Color(0xFFD0C5B8), style: BorderStyle.none),
+                    // Customer Name
+                    const Text(
+                      'CUSTOMER:',
+                      style: TextStyle(
+                        fontFamily: 'Courier',
+                        fontSize: 7,
+                        color: Color(0xFF5A4A3A),
+                        letterSpacing: 1,
                       ),
-                      child: Column(
-                        children: [
-                          const Text(
-                            'CUSTOMER:',
-                            style: TextStyle(
-                              fontFamily: 'Courier',
-                              fontSize: 10,
-                              color: Color(0xFF5A4A3A),
-                              letterSpacing: 1,
-                            ),
-                          ),
-                          Text(
-                            order.customerName.toUpperCase(),
-                            style: const TextStyle(
-                              fontFamily: 'Courier',
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF2C1810),
-                            ),
-                          ),
-                        ],
+                    ),
+                    Text(
+                      order.customerName.toUpperCase(),
+                      style: const TextStyle(
+                        fontFamily: 'Courier',
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF2C1810),
                       ),
                     ),
                     
-                    const SizedBox(height: 8),
-
-                    
-                    // Dashed line
+                    const SizedBox(height: 6),
                     _buildDashedLine(),
-                    
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     
                     // ===== ORDER ITEMS =====
                     ...order.items.map((item) => _buildReceiptItem(item)),
                     
-                    const SizedBox(height: 8),
-                    
-                    // Dashed line
+                    const SizedBox(height: 6),
                     _buildDashedLine(),
-                    
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     
                     // ===== TOTAL =====
                     Row(
@@ -185,16 +164,16 @@ class ReceiptDialog extends StatelessWidget {
                           'TOTAL',
                           style: TextStyle(
                             fontFamily: 'Courier',
-                            fontSize: 16,
+                            fontSize: 12,
                             fontWeight: FontWeight.bold,
                             color: Color(0xFF2C1810),
                           ),
                         ),
                         Text(
-                          '₱${order.totalAmount.toStringAsFixed(2)}',
+                          'P${order.totalAmount.toStringAsFixed(2)}',
                           style: const TextStyle(
                             fontFamily: 'Courier',
-                            fontSize: 18,
+                            fontSize: 14,
                             fontWeight: FontWeight.bold,
                             color: Color(0xFF2C1810),
                           ),
@@ -202,72 +181,67 @@ class ReceiptDialog extends StatelessWidget {
                       ],
                     ),
                     
-                    const SizedBox(height: 16),
-                    
-                    // Dashed line
+                    const SizedBox(height: 10),
                     _buildDashedLine(),
-                    
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 10),
                     
                     // ===== FOOTER =====
                     const Text(
                       '~ drop by and have a taste! ~',
                       style: TextStyle(
                         fontFamily: 'Courier',
-                        fontSize: 12,
+                        fontSize: 8,
                         color: Color(0xFF4A7C59),
                         fontStyle: FontStyle.italic,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 6),
                     
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
                         color: const Color(0xFF4A7C59).withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(4),
                         border: Border.all(
                           color: const Color(0xFF4A7C59).withOpacity(0.3),
                         ),
                       ),
                       child: const Text(
-                        'DAILY OPEN 2:00PM - 10:00PM',
+                        'OPEN 2PM - 10PM',
                         style: TextStyle(
                           fontFamily: 'Courier',
-                          fontSize: 11,
+                          fontSize: 8,
                           fontWeight: FontWeight.bold,
                           color: Color(0xFF4A7C59),
-                          letterSpacing: 1,
+                          letterSpacing: 0.5,
                         ),
                       ),
                     ),
                     
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 10),
                     
-                    // QR Code to Facebook
+                    // QR Code
                     const Text(
                       'Follow us on Facebook!',
                       style: TextStyle(
                         fontFamily: 'Courier',
-                        fontSize: 10,
+                        fontSize: 7,
                         color: Color(0xFF8B7355),
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 4),
                     Container(
-                      padding: const EdgeInsets.all(8),
+                      padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
                         color: Colors.white,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: const Color(0xFFE8E0D8),
-                        ),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: const Color(0xFFE8E0D8)),
                       ),
                       child: QrImageView(
                         data: 'https://www.facebook.com/mr.buenaz.2025',
                         version: QrVersions.auto,
-                        size: 80,
+                        size: 50,
                         backgroundColor: Colors.white,
                         eyeStyle: const QrEyeStyle(
                           eyeShape: QrEyeShape.square,
@@ -279,29 +253,27 @@ class ReceiptDialog extends StatelessWidget {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     const Text(
                       '@mr.buenaz.2025',
                       style: TextStyle(
                         fontFamily: 'Courier',
-                        fontSize: 9,
+                        fontSize: 7,
                         color: Color(0xFF4A7C59),
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                     
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 10),
                     
-                    // Thank you message
                     const Text(
                       'Thank you for your order!',
                       style: TextStyle(
                         fontFamily: 'Courier',
-                        fontSize: 12,
+                        fontSize: 9,
                         color: Color(0xFF8B7355),
                       ),
                     ),
-
                   ],
                 ),
               ),
@@ -309,7 +281,7 @@ class ReceiptDialog extends StatelessWidget {
             
             // Close button
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(8),
               decoration: const BoxDecoration(
                 border: Border(
                   top: BorderSide(color: Color(0xFFE8E0D8)),
@@ -322,15 +294,15 @@ class ReceiptDialog extends StatelessWidget {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF4A7C59),
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(6),
                     ),
                   ),
                   child: const Text(
                     'Close Receipt',
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: 10,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -345,11 +317,11 @@ class ReceiptDialog extends StatelessWidget {
 
   Widget _buildReceiptItem(CartItem item) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Product name and quantity
+          // Product name and price
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -358,17 +330,17 @@ class ReceiptDialog extends StatelessWidget {
                   '${item.quantity}x ${item.product.name}',
                   style: const TextStyle(
                     fontFamily: 'Courier',
-                    fontSize: 12,
+                    fontSize: 9,
                     fontWeight: FontWeight.w600,
                     color: Color(0xFF2C1810),
                   ),
                 ),
               ),
               Text(
-                '₱${(item.basePrice * item.quantity).toStringAsFixed(2)}',
+                'P${(item.basePrice * item.quantity).toStringAsFixed(2)}',
                 style: const TextStyle(
                   fontFamily: 'Courier',
-                  fontSize: 12,
+                  fontSize: 9,
                   color: Color(0xFF5A4A3A),
                 ),
               ),
@@ -377,14 +349,14 @@ class ReceiptDialog extends StatelessWidget {
           
           // Size
           Padding(
-            padding: const EdgeInsets.only(left: 16),
+            padding: const EdgeInsets.only(left: 10),
             child: Text(
               item.product.categoryId == '7' 
                   ? (item.size == 'tall' ? 'Small' : 'Large')
                   : (item.size == 'tall' ? '16oz' : '22oz'),
               style: const TextStyle(
                 fontFamily: 'Courier',
-                fontSize: 10,
+                fontSize: 7,
                 color: Color(0xFF8B7355),
               ),
             ),
@@ -393,7 +365,7 @@ class ReceiptDialog extends StatelessWidget {
           // Add-ons
           if (item.addOns.isNotEmpty)
             ...item.addOns.map((addOn) => Padding(
-              padding: const EdgeInsets.only(left: 16),
+              padding: const EdgeInsets.only(left: 10),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -401,15 +373,15 @@ class ReceiptDialog extends StatelessWidget {
                     '+ ${addOn.name}',
                     style: const TextStyle(
                       fontFamily: 'Courier',
-                      fontSize: 10,
+                      fontSize: 7,
                       color: Color(0xFF4A7C59),
                     ),
                   ),
                   Text(
-                    '₱${(addOn.price * item.quantity).toStringAsFixed(2)}',
+                    'P${(addOn.price * item.quantity).toStringAsFixed(2)}',
                     style: const TextStyle(
                       fontFamily: 'Courier',
-                      fontSize: 10,
+                      fontSize: 7,
                       color: Color(0xFF8B7355),
                     ),
                   ),
@@ -417,18 +389,18 @@ class ReceiptDialog extends StatelessWidget {
               ),
             )),
           
-          // Item subtotal if has add-ons
+          // Subtotal if has add-ons
           if (item.addOns.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(left: 16, top: 4),
+              padding: const EdgeInsets.only(left: 10, top: 2),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   Text(
-                    'Subtotal: ₱${(item.totalPrice * item.quantity).toStringAsFixed(2)}',
+                    'Sub: P${(item.totalPrice * item.quantity).toStringAsFixed(2)}',
                     style: const TextStyle(
                       fontFamily: 'Courier',
-                      fontSize: 10,
+                      fontSize: 7,
                       fontWeight: FontWeight.w600,
                       color: Color(0xFF5A4A3A),
                     ),
@@ -444,7 +416,7 @@ class ReceiptDialog extends StatelessWidget {
   Widget _buildDashedLine() {
     return Row(
       children: List.generate(
-        50,
+        36,
         (index) => Expanded(
           child: Container(
             height: 1,
